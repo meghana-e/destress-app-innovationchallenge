@@ -716,6 +716,186 @@ def api_dashboard(current_user: Dict[str, Any] = Depends(get_current_user)) -> D
     return dashboard(current_user)
 
 
+@app.get("/agent-debate")
+def agent_debate(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Multi-agent debate engine: 3 specialist agents analyze stress data and reach consensus.
+    Returns agent recommendations, vote tally, and final decision with actions.
+    """
+    assessment = get_latest_assessment(current_user["id"])
+    
+    if not assessment:
+        return {
+            "status": "no_data",
+            "message": "Complete the questionnaire first.",
+            "agents": [],
+            "final_decision": None,
+        }
+    
+    model_input = assessment.get("model_input", {})
+    strain_index = assessment.get("strain_index", 0)
+    weekly_trend = assessment.get("weekly_trend", "")
+    
+    # AGENT 1: Behavioural Signal Agent
+    sleeping_habit = model_input.get("sleeping_habit", 6)
+    exercise_habit = model_input.get("exercise_habit", 2)
+    
+    observations_1 = []
+    if sleeping_habit < 6:
+        observations_1.append(f"Fatigue detected (sleep {sleeping_habit}h)")
+    if exercise_habit <= 2:
+        observations_1.append(f"Recovery deficit (exercise {exercise_habit}d/week)")
+    
+    if strain_index >= 65:
+        signal_1 = "elevated"
+        vote_1 = "intervene"
+        recommendation_1 = "Take 5-min break now"
+    elif strain_index >= 35:
+        signal_1 = "moderate"
+        vote_1 = "monitor"
+        recommendation_1 = "Monitor in 2h"
+    else:
+        signal_1 = "within normal range"
+        vote_1 = "standby"
+        recommendation_1 = "No action needed"
+    
+    agent_1 = {
+        "agent": "Behavioural Signal Agent",
+        "icon": "activity",
+        "observation": f"Strain {signal_1} ({strain_index}). " + ("; ".join(observations_1) if observations_1 else "Normal vitals"),
+        "recommendation": recommendation_1,
+        "confidence": min(100, int(strain_index * 1.1)),
+        "vote": vote_1,
+    }
+    
+    # AGENT 2: Context & Workload Agent
+    working_hours = model_input.get("working_hours", 8)
+    work_pressure = model_input.get("work_pressure", 2)
+    manager_support = model_input.get("manager_support", 2)
+    work_life_balance = model_input.get("work_life_balance", 2)
+    social_person = model_input.get("social_person", 1)
+    lives_with_family = model_input.get("lives_with_family", 1)
+    work_from = model_input.get("work_from", 0)
+    
+    flags_2 = []
+    if working_hours > 10 and work_pressure == 3:
+        flags_2.append("Critical overload detected")
+    if sleeping_habit < 6 and exercise_habit <= 2:
+        flags_2.append("Recovery deficit alarming")
+    if manager_support <= 2 and work_life_balance == 0:
+        flags_2.append("Support and balance gap critical")
+    if social_person == 0 and lives_with_family == 0 and work_from == 2:
+        flags_2.append("Isolation risk high")
+    
+    if len(flags_2) >= 2:
+        severity_2 = "critical"
+        vote_2 = "intervene"
+    elif len(flags_2) == 1:
+        severity_2 = "moderate"
+        vote_2 = "monitor"
+    else:
+        severity_2 = "low"
+        vote_2 = "standby"
+    
+    observation_2 = f"Context: {severity_2}. " + ("; ".join(flags_2) if flags_2 else "Contextually stable")
+    recommendations = {
+        "critical": "Urgent intervention needed",
+        "moderate": "Take preventive action soon",
+        "low": "Maintainable workload"
+    }
+    
+    agent_2 = {
+        "agent": "Context & Workload Agent",
+        "icon": "briefcase",
+        "observation": observation_2,
+        "recommendation": recommendations[severity_2],
+        "confidence": min(100, 40 + (len(flags_2) * 20)),
+        "vote": vote_2,
+    }
+    
+    # AGENT 3: Trend & Trajectory Agent
+    is_rising = any(word in weekly_trend.lower() for word in ["rising", "increasing"])
+    is_improving = any(word in weekly_trend.lower() for word in ["improving", "decreasing"])
+    
+    if is_rising and strain_index >= 55:
+        vote_3 = "intervene"
+        confidence_3 = 85
+        recommendation_3 = "Urgent — adjust workload immediately"
+    elif is_rising:
+        vote_3 = "monitor"
+        confidence_3 = 75
+        recommendation_3 = "Take preventive action"
+    elif is_improving:
+        vote_3 = "standby"
+        confidence_3 = 80
+        recommendation_3 = "Keep recovery habits"
+    else:
+        vote_3 = "standby"
+        confidence_3 = 65
+        recommendation_3 = "Continue current pace"
+    
+    agent_3 = {
+        "agent": "Trend & Trajectory Agent",
+        "icon": "trending-up",
+        "observation": f"Trajectory: {weekly_trend}",
+        "recommendation": recommendation_3,
+        "confidence": confidence_3,
+        "vote": vote_3,
+    }
+    
+    # LEAD AGENT: Vote Tally & Final Decision
+    votes = [agent_1["vote"], agent_2["vote"], agent_3["vote"]]
+    intervene_count = votes.count("intervene")
+    monitor_count = votes.count("monitor")
+    standby_count = votes.count("standby")
+    
+    if intervene_count >= 2:
+        final_action = "INTERVENE"
+        reasoning = f"Consensus ({intervene_count} intervene, {monitor_count} monitor, {standby_count} standby): Immediate action required"
+        actions_taken = [
+            "Focus Protection Mode (30-min DND)",
+            "Micro-break nudge sent",
+            "Coaching message activated",
+        ]
+    elif monitor_count >= 2 or intervene_count == 1:
+        final_action = "MONITOR"
+        reasoning = f"Consensus ({intervene_count} intervene, {monitor_count} monitor, {standby_count} standby): Preventive monitoring active"
+        actions_taken = [
+            "Passive monitoring continues",
+            "Reminder scheduled for tomorrow",
+        ]
+    else:
+        final_action = "STANDBY"
+        reasoning = f"Consensus ({intervene_count} intervene, {monitor_count} monitor, {standby_count} standby): Low stress detected, system on standby"
+        actions_taken = [
+            "System standby — low risk",
+        ]
+    
+    final_decision = {
+        "action": final_action,
+        "reasoning": reasoning,
+        "actions_taken": actions_taken,
+        "decided_at": utc_now(),
+    }
+    
+    return {
+        "status": "complete",
+        "agents": [agent_1, agent_2, agent_3],
+        "vote_summary": {
+            "intervene": intervene_count,
+            "monitor": monitor_count,
+            "standby": standby_count,
+        },
+        "final_decision": final_decision,
+    }
+
+
+@app.get("/api/agent-debate")
+def api_agent_debate(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """API endpoint for agent debate engine"""
+    return agent_debate(current_user)
+
+
 if FRONTEND_DIST_DIR.exists():
     assets_dir = FRONTEND_DIST_DIR / "assets"
     if assets_dir.exists():

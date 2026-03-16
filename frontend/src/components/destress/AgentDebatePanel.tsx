@@ -1,312 +1,265 @@
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Eye, Heart, Calendar, Brain, Volume2, CalendarOff, Music,
-  Timer, Wind, ArrowRightLeft, Headphones, Shield, Activity,
-  Clock, Pause, BarChart3,
-} from "lucide-react";
-
-/* ─── Types ─── */
-type Mode = "focus" | "micro" | "deep";
+import { useEffect, useState } from "react";
+import { Activity, Briefcase, TrendingUp, CheckCircle, AlertCircle, Eye } from "lucide-react";
 
 interface Agent {
-  name: string;
-  icon: React.ElementType;
-  colorToken: string;   // tailwind color token
+  agent: string;
+  icon: "activity" | "briefcase" | "trending-up";
+  observation: string;
+  recommendation: string;
+  confidence: number;
+  vote: "intervene" | "monitor" | "standby";
+}
+
+interface VoteSummary {
+  intervene: number;
+  monitor: number;
+  standby: number;
+}
+
+interface FinalDecision {
+  action: "INTERVENE" | "MONITOR" | "STANDBY";
   reasoning: string;
-  vote: Mode;
-  voteLabel: string;
-  detail: string;
+  actions_taken: string[];
+  decided_at: string;
 }
 
-interface ActionItem {
-  icon: React.ElementType;
-  label: string;
+interface DebateResponse {
+  status: "complete" | "no_data";
+  message?: string;
+  agents: Agent[];
+  vote_summary: VoteSummary;
+  final_decision: FinalDecision | null;
 }
 
-interface TimelineEntry {
-  time: string;
-  mode: Mode;
-  label: string;
+interface AgentDebatePanelProps {
+  token: string;
 }
 
-/* ─── Data ─── */
-const modeConfig: Record<Mode, { label: string; emoji: string; color: string; bg: string; glow: string }> = {
-  focus:  { label: "Focus Mode",     emoji: "🔵", color: "text-focus",  bg: "bg-focus/10",  glow: "shadow-[0_0_24px_hsl(var(--focus)/0.25)]" },
-  micro:  { label: "Micro Recovery", emoji: "🟡", color: "text-caution", bg: "bg-caution/10", glow: "shadow-[0_0_24px_hsl(var(--caution)/0.25)]" },
-  deep:   { label: "Deep Recovery",  emoji: "🔴", color: "text-alert",  bg: "bg-alert/10",  glow: "shadow-[0_0_24px_hsl(var(--alert)/0.25)]" },
+const getIconComponent = (iconName: string) => {
+  const icons: Record<string, React.ReactNode> = {
+    activity: <Activity className="w-5 h-5" />,
+    briefcase: <Briefcase className="w-5 h-5" />,
+    "trending-up": <TrendingUp className="w-5 h-5" />,
+  };
+  return icons[iconName] || null;
 };
 
-const agents: Agent[] = [
-  {
-    name: "Visual Agent",
-    icon: Eye,
-    colorToken: "focus",
-    reasoning: "Facial tension and eye fatigue detected. Blink rate 40% below baseline.",
-    vote: "focus",
-    voteLabel: "Focus Mode",
-    detail: "Concentration indicators high — not distress.",
-  },
-  {
-    name: "Biometric Agent",
-    icon: Heart,
-    colorToken: "alert",
-    reasoning: "Heart rate variability below baseline. HRV dropped 22% in last hour.",
-    vote: "micro",
-    voteLabel: "Micro Recovery",
-    detail: "Sympathetic dominance rising — recovery window recommended.",
-  },
-  {
-    name: "Calendar Agent",
-    icon: Calendar,
-    colorToken: "caution",
-    reasoning: "Back-to-back meetings detected for the next 3 hours. Deadline in 2.5 hrs.",
-    vote: "focus",
-    voteLabel: "Focus Mode",
-    detail: "Deadline proximity overrides recovery — protect focus window.",
-  },
-];
-
-const finalMode: Mode = "focus";
-
-const actionsByMode: Record<Mode, ActionItem[]> = {
-  focus: [
-    { icon: Music, label: "Concentration playlist started" },
-    { icon: Volume2, label: "Slack set to Do Not Disturb" },
-    { icon: Timer, label: "Deep work timer activated" },
-  ],
-  micro: [
-    { icon: Pause, label: "10 minute break scheduled" },
-    { icon: Wind, label: "Breathing exercise recommended" },
-    { icon: CalendarOff, label: "Optional meeting moved" },
-  ],
-  deep: [
-    { icon: CalendarOff, label: "Calendar buffer inserted" },
-    { icon: BarChart3, label: "Meeting load reduced" },
-    { icon: Activity, label: "Recovery activity suggested" },
-  ],
+const getVoteBadgeColor = (vote: string) => {
+  const colors: Record<string, string> = {
+    intervene: "bg-red-900 text-red-100",
+    monitor: "bg-yellow-900 text-yellow-100",
+    standby: "bg-green-900 text-green-100",
+  };
+  return colors[vote] || "bg-gray-700 text-gray-100";
 };
 
-const decisionExplanation =
-  "2 of 3 agents recommend Focus Mode. Deadline proximity prioritized over recovery signals. Micro recovery scheduled after deadline window.";
+const getVoteBadgeLabel = (vote: string) => {
+  const labels: Record<string, string> = {
+    intervene: "⚡ INTERVENE",
+    monitor: "👁 MONITOR",
+    standby: "✅ STANDBY",
+  };
+  return labels[vote] || vote;
+};
 
-const timeline: TimelineEntry[] = [
-  { time: "10:30 AM", mode: "focus", label: "Focus Mode activated" },
-  { time: "1:15 PM",  mode: "micro", label: "Micro Recovery recommended" },
-  { time: "4:20 PM",  mode: "deep",  label: "Deep Recovery triggered" },
-];
+const getDecisionBorderColor = (action: string) => {
+  const colors: Record<string, string> = {
+    INTERVENE: "border-red-500",
+    MONITOR: "border-yellow-500",
+    STANDBY: "border-green-500",
+  };
+  return colors[action] || "border-gray-600";
+};
 
-/* ─── Phases ─── */
-const PHASE_DELAY = 800;   // ms between agents
-const DEBATE_START = 3 * PHASE_DELAY;
-const DECISION_REVEAL = DEBATE_START + 2000;
-const ACTIONS_REVEAL = DECISION_REVEAL + 600;
+const getDecisionBgColor = (action: string) => {
+  const colors: Record<string, string> = {
+    INTERVENE: "bg-red-950",
+    MONITOR: "bg-yellow-950",
+    STANDBY: "bg-green-950",
+  };
+  return colors[action] || "bg-gray-900";
+};
 
-/* ─── Component ─── */
-const AgentDebatePanel = () => {
-  const [visibleAgents, setVisibleAgents] = useState(0);
-  const [debating, setDebating] = useState(false);
-  const [decided, setDecided] = useState(false);
-  const [showActions, setShowActions] = useState(false);
+const formatTimestamp = (isoString: string) => {
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return isoString;
+  }
+};
 
-  useEffect(() => {
-    // Sequential agent reveal
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    for (let i = 1; i <= agents.length; i++) {
-      timers.push(setTimeout(() => setVisibleAgents(i), i * PHASE_DELAY));
-    }
-    // Debate phase
-    timers.push(setTimeout(() => setDebating(true), DEBATE_START));
-    // Decision reveal
-    timers.push(setTimeout(() => { setDebating(false); setDecided(true); }, DECISION_REVEAL));
-    // Actions reveal
-    timers.push(setTimeout(() => setShowActions(true), ACTIONS_REVEAL));
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
-  const mode = modeConfig[finalMode];
+const ConfidenceBar = ({ confidence }: { confidence: number }) => {
+  let barColor = "bg-green-600";
+  if (confidence > 70) barColor = "bg-red-600";
+  else if (confidence > 40) barColor = "bg-yellow-600";
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h2 className="font-display text-2xl font-bold">Agent Debate Engine</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Three agents analyze your state, debate, and reach a unified recommendation.
-        </p>
+    <div className="mt-2 flex items-center gap-2">
+      <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+        <div
+          className={`h-full ${barColor} transition-all`}
+          style={{ width: `${confidence}%` }}
+        ></div>
       </div>
-
-      {/* Agent Cards + Debate Lines */}
-      <div className="relative">
-        <div className="grid gap-4 md:grid-cols-3">
-          {agents.map((agent, i) => {
-            const Icon = agent.icon;
-            const vm = modeConfig[agent.vote];
-            const visible = i < visibleAgents;
-            return (
-              <AnimatePresence key={agent.name}>
-                {visible && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 24, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ type: "spring", stiffness: 260, damping: 22 }}
-                    className={`relative rounded-xl border border-border bg-card p-5 space-y-4 transition-shadow duration-700 ${
-                      debating ? `shadow-[0_0_16px_hsl(var(--${agent.colorToken})/0.2)]` : ""
-                    }`}
-                  >
-                    {/* Status dot */}
-                    <span
-                      className={`absolute right-4 top-4 h-2 w-2 rounded-full bg-${agent.colorToken} ${
-                        debating ? "animate-pulse" : ""
-                      }`}
-                    />
-
-                    <div className="flex items-center gap-3">
-                      <div className={`flex h-9 w-9 items-center justify-center rounded-lg bg-${agent.colorToken}/10`}>
-                        <Icon className={`h-5 w-5 text-${agent.colorToken}`} />
-                      </div>
-                      <h3 className="font-display font-semibold">{agent.name}</h3>
-                    </div>
-
-                    <p className="text-sm text-muted-foreground">{agent.reasoning}</p>
-
-                    <div className={`rounded-lg ${vm.bg} px-3 py-2`}>
-                      <p className="text-xs font-medium text-muted-foreground">Recommendation</p>
-                      <p className="font-display text-sm font-semibold">
-                        {vm.emoji} {vm.label}
-                      </p>
-                    </div>
-
-                    <p className="text-xs text-muted-foreground italic">{agent.detail}</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            );
-          })}
-        </div>
-
-        {/* Debate pulse connector */}
-        <AnimatePresence>
-          {debating && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 pointer-events-none flex items-center justify-center"
-            >
-              <div className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/5 px-4 py-2 backdrop-blur-sm">
-                <ArrowRightLeft className="h-4 w-4 text-primary animate-pulse" />
-                <span className="text-xs font-medium text-primary">Agents debating…</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Lead Agent Decision */}
-      <AnimatePresence>
-        {decided && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.92, y: 16 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ type: "spring", stiffness: 200, damping: 20 }}
-            className={`rounded-xl border ${mode.bg} border-${finalMode === "focus" ? "focus" : finalMode === "micro" ? "caution" : "alert"}/30 p-6 space-y-5 ${mode.glow} transition-shadow duration-700`}
-          >
-            <div className="flex items-center gap-3">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${mode.bg}`}>
-                <Brain className={`h-6 w-6 ${mode.color}`} />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Lead Agent Decision</p>
-                <h3 className={`font-display text-xl font-bold ${mode.color}`}>
-                  {mode.emoji} {mode.label}
-                </h3>
-              </div>
-            </div>
-
-            {/* Explanation */}
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {decisionExplanation}
-            </p>
-
-            {/* Autonomous Actions */}
-            <AnimatePresence>
-              {showActions && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="space-y-2"
-                >
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Autonomous Actions Taken
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {actionsByMode[finalMode].map((action, i) => {
-                      const AIcon = action.icon;
-                      return (
-                        <motion.div
-                          key={action.label}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.1 }}
-                          className="flex items-center gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-3 hover:bg-secondary/80 transition-colors cursor-default"
-                        >
-                          <AIcon className={`h-4 w-4 ${mode.color} shrink-0`} />
-                          <span className="text-sm">{action.label}</span>
-                          <span className="ml-auto text-xs text-calm shrink-0">✓</span>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Decision History Timeline */}
-      <AnimatePresence>
-        {showActions && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="space-y-3"
-          >
-            <h3 className="font-display text-lg font-semibold">Decision History</h3>
-            <div className="relative space-y-0">
-              {/* Vertical line */}
-              <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
-
-              {timeline.map((entry, i) => {
-                const em = modeConfig[entry.mode];
-                return (
-                  <motion.div
-                    key={entry.time}
-                    initial={{ opacity: 0, x: -8 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.4 + i * 0.12 }}
-                    className="relative flex items-center gap-4 py-2 pl-6"
-                  >
-                    <span className={`absolute left-0 h-3.5 w-3.5 rounded-full border-2 border-background bg-${entry.mode === "focus" ? "focus" : entry.mode === "micro" ? "caution" : "alert"}`} />
-                    <span className="text-xs font-mono text-muted-foreground w-16 shrink-0">
-                      {entry.time}
-                    </span>
-                    <span className="text-sm">{entry.label}</span>
-                    <span className={`ml-auto text-xs font-medium ${em.color}`}>
-                      {em.emoji} {em.label}
-                    </span>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <span className="text-xs text-gray-400 w-10 text-right">{confidence}%</span>
     </div>
   );
 };
 
-export default AgentDebatePanel;
+const AgentCard = ({ agent }: { agent: Agent }) => (
+  <div className="bg-gray-900 rounded-xl shadow-lg p-5 border border-gray-800">
+    <div className="flex items-center justify-between mb-3">
+      <h3 className="font-bold text-white text-sm">{agent.agent}</h3>
+      <div className="text-gray-400">{getIconComponent(agent.icon)}</div>
+    </div>
+
+    <p className="text-xs text-gray-400 mb-3">{agent.observation}</p>
+
+    <p className="text-sm italic text-gray-300 mb-3">{agent.recommendation}</p>
+
+    <ConfidenceBar confidence={agent.confidence} />
+
+    <div className="mt-3">
+      <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getVoteBadgeColor(agent.vote)}`}>
+        {getVoteBadgeLabel(agent.vote)}
+      </span>
+    </div>
+  </div>
+);
+
+export default function AgentDebatePanel({ token }: AgentDebatePanelProps) {
+  const [data, setData] = useState<DebateResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchDebate = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch("/api/agent-debate", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch agent debate: ${response.status}`);
+        }
+
+        const result: DebateResponse = await response.json();
+        setData(result);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (token) {
+      fetchDebate();
+    }
+  }, [token]);
+
+  if (loading) {
+    return (
+      <div className="w-full bg-gray-950 rounded-2xl p-8 border border-gray-800">
+        <div className="flex items-center justify-center gap-3">
+          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+          <p className="text-gray-400">Agents are deliberating...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="w-full bg-gray-950 rounded-2xl p-8 border border-gray-800">
+        <p className="text-red-400">{error || "Failed to load agent debate"}</p>
+      </div>
+    );
+  }
+
+  if (data.status === "no_data") {
+    return (
+      <div className="w-full bg-gray-950 rounded-2xl p-8 border border-gray-800 text-center">
+        <AlertCircle className="w-8 h-8 mx-auto mb-3 text-gray-500" />
+        <p className="text-gray-400">{data.message || "Complete your questionnaire to activate Agent Debate Engine"}</p>
+      </div>
+    );
+  }
+
+  if (data.status !== "complete" || data.agents.length === 0) {
+    return (
+      <div className="w-full bg-gray-950 rounded-2xl p-8 border border-gray-800">
+        <p className="text-gray-400">No agent debate data available</p>
+      </div>
+    );
+  }
+
+  const decision = data.final_decision!;
+
+  return (
+    <div className="w-full space-y-6">
+      {/* Header */}
+      <div className="bg-gray-950 rounded-2xl p-6 border border-gray-800">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <span className="text-xs font-semibold text-green-400">LIVE CONSENSUS</span>
+        </div>
+        <h2 className="text-2xl font-bold text-white mb-1">AI Agent Debate Engine</h2>
+        <p className="text-sm text-gray-400">3 specialist agents analysing your data and reaching consensus</p>
+      </div>
+
+      {/* Agent Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {data.agents.map((agent, idx) => (
+          <AgentCard key={idx} agent={agent} />
+        ))}
+      </div>
+
+      {/* Vote Tally */}
+      <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+        <p className="text-sm text-gray-300 text-center">
+          <span className="font-semibold">⚡ {data.vote_summary.intervene} Intervene</span>
+          {" · "}
+          <span className="font-semibold">👁 {data.vote_summary.monitor} Monitor</span>
+          {" · "}
+          <span className="font-semibold">✅ {data.vote_summary.standby} Standby</span>
+        </p>
+      </div>
+
+      {/* Final Decision Card */}
+      <div className={`rounded-xl p-6 border-2 ${getDecisionBorderColor(decision.action)} ${getDecisionBgColor(decision.action)}`}>
+        <div className="flex items-center gap-3 mb-3">
+          {decision.action === "INTERVENE" && <AlertCircle className="w-6 h-6 text-red-500" />}
+          {decision.action === "MONITOR" && <Eye className="w-6 h-6 text-yellow-500" />}
+          {decision.action === "STANDBY" && <CheckCircle className="w-6 h-6 text-green-500" />}
+          <h3 className="text-xl font-bold text-white">{decision.action}</h3>
+        </div>
+
+        <p className="text-sm text-gray-300 mb-4">{decision.reasoning}</p>
+
+        <div className="space-y-2 mb-4">
+          {decision.actions_taken.map((action, idx) => (
+            <div key={idx} className="flex items-start gap-2">
+              <span className="text-gray-500 mt-0.5">•</span>
+              <p className="text-sm text-gray-300">{action}</p>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-xs text-gray-500">Decided at {formatTimestamp(decision.decided_at)}</p>
+      </div>
+    </div>
+  );
+}
