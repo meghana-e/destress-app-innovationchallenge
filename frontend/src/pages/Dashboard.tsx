@@ -172,7 +172,7 @@ const Dashboard = () => {
                 transition={{ duration: 0.2 }}
               >
                 {activeNav === "dashboard" && <DashboardOverview onNavigate={setActiveNav} dashboardData={dashboardData} userName={user.full_name} />}
-                {activeNav === "debate" && <AgentDebatePanel />}
+                {activeNav === "debate" && <AgentDebatePanel token={token || ""} />}
                 {activeNav === "burnout" && <BurnoutTrajectoryTracker />}
                 {activeNav === "heatmap" && <CognitiveHeatmap />}
                 {activeNav === "insights" && <StressPatternInsights />}

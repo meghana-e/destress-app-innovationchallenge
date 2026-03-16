@@ -18,3 +18,4 @@ Full-stack merged application with:
 
 Frontend runs on `http://localhost:3000`.
 Backend runs on `http://localhost:5000`.
+Sample runs on 'http://localhost:4000'. 

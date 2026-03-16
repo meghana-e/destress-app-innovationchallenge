@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Activity, Briefcase, TrendingUp, CheckCircle, AlertCircle, Eye } from "lucide-react";
+import { Activity, Briefcase, TrendingUp, CheckCircle, AlertCircle, Eye, Calendar } from "lucide-react";
+import CalibrationModal from "./CalibrationModal";
 
 interface Agent {
   agent: string;
-  icon: "activity" | "briefcase" | "trending-up";
+  icon: "activity" | "briefcase" | "trending-up" | "calendar";
   observation: string;
   recommendation: string;
   confidence: number;
@@ -40,6 +41,7 @@ const getIconComponent = (iconName: string) => {
     activity: <Activity className="w-5 h-5" />,
     briefcase: <Briefcase className="w-5 h-5" />,
     "trending-up": <TrendingUp className="w-5 h-5" />,
+    calendar: <Calendar className="w-5 h-5" />,
   };
   return icons[iconName] || null;
 };
@@ -135,7 +137,7 @@ const AgentCard = ({ agent }: { agent: Agent }) => (
   </div>
 );
 
-export default function AgentDebatePanel({ token }: AgentDebatePanelProps) {
+export default function AgentDebatePanel({ token: propToken }: AgentDebatePanelProps) {
   const [data, setData] = useState<DebateResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +146,17 @@ export default function AgentDebatePanel({ token }: AgentDebatePanelProps) {
     const fetchDebate = async () => {
       try {
         setLoading(true);
+        
+        // Use token from props or localStorage
+        const token = propToken || (typeof window !== "undefined" ? localStorage.getItem("token") : null);
+        
+        if (!token) {
+          setError("No authentication token found. Please log in.");
+          setData(null);
+          setLoading(false);
+          return;
+        }
+
         const response = await fetch("/api/agent-debate", {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -151,33 +164,62 @@ export default function AgentDebatePanel({ token }: AgentDebatePanelProps) {
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to fetch agent debate: ${response.status}`);
+          const errorData = await response.json();
+          throw new Error(errorData.detail || `Failed to fetch agent debate: ${response.status}`);
         }
 
         const result: DebateResponse = await response.json();
+        
+        // Add mock Calendar Agent
+        if (result.status === "complete") {
+          const calendarAgent: Agent = {
+            agent: "Calendar Agent",
+            icon: "calendar",
+            observation: "3 back-to-back meetings detected (2h 30m continuous). Buffer time available: 2.5h until next commitment.",
+            recommendation: "Insert 15-min buffer before next meeting",
+            confidence: 72,
+            vote: "monitor",
+          };
+          
+          result.agents.push(calendarAgent);
+          
+          // Update vote tally to reflect new agent
+          if (calendarAgent.vote === "monitor") {
+            result.vote_summary.monitor += 1;
+          } else if (calendarAgent.vote === "intervene") {
+            result.vote_summary.intervene += 1;
+          } else {
+            result.vote_summary.standby += 1;
+          }
+        }
+        
         setData(result);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
         setData(null);
       } finally {
-        setLoading(false);
+        // Ensure calibration modal is visible for at least 4 seconds
+        setTimeout(() => {
+          setLoading(false);
+        }, 4000);
       }
     };
 
-    if (token) {
-      fetchDebate();
-    }
-  }, [token]);
+    fetchDebate();
+  }, [propToken]);
 
   if (loading) {
     return (
-      <div className="w-full bg-gray-950 rounded-2xl p-8 border border-gray-800">
-        <div className="flex items-center justify-center gap-3">
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-          <p className="text-gray-400">Agents are deliberating...</p>
+      <>
+        <CalibrationModal isVisible={true} />
+        <div className="w-full bg-gray-950 rounded-2xl p-8 border border-gray-800">
+          <div className="flex items-center justify-center gap-3">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+            <p className="text-gray-400">Agents are deliberating...</p>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -217,7 +259,7 @@ export default function AgentDebatePanel({ token }: AgentDebatePanelProps) {
           <span className="text-xs font-semibold text-green-400">LIVE CONSENSUS</span>
         </div>
         <h2 className="text-2xl font-bold text-white mb-1">AI Agent Debate Engine</h2>
-        <p className="text-sm text-gray-400">3 specialist agents analysing your data and reaching consensus</p>
+        <p className="text-sm text-gray-400">4 specialist agents analysing your data and reaching consensus</p>
       </div>
 
       {/* Agent Cards Grid */}
